@@ -1,7 +1,7 @@
 price_MBS <- function(Principal,MR,term,r0,r_mu,sigma,Kappa){
-  an=(1-(1/(1+MR/12))^term)/(MR/12)
   r=MR/12
-  PMT=Principal/an
+  an=(1-(1/(1+r))^term)/(r) # standard $1 annuity monthly
+  PMT=Principal/an # actual monthly pmt without default
   
   Term=seq(0,term,1)
   loan_t=SP=IP=c(0)
@@ -12,12 +12,16 @@ price_MBS <- function(Principal,MR,term,r0,r_mu,sigma,Kappa){
   m=term+122
   rt=matrix(0,1000,m)
   rt[,1]=r0
-  for(i in 1:1000){
-    set.seed(1234567890+i)
-    dw=rnorm(m,0,1)
-    for(k in 2:(m)){
-        rt[i,k]=abs(rt[i,(k-1)]+Kappa*(r_mu-rt[i,(k-1)])*dt+sigma*sqrt(rt[i,(k-1)])*sqrt(dt)*dw[(k-1)])
-      }
+  
+  #anti-variate control
+  set.seed(123456789)
+  dw=matrix(rnorm(1000*m/2,0,1), ncol=m, nrow=1000/2)
+  dw=rbind(dw, -dw)
+    
+  for(k in 2:(m)){
+    # Monte carlo on interest rate CIR 
+    rt[,k]= abs(rt[,(k-1)]+Kappa*(r_mu-rt[,(k-1)])*dt+sigma*sqrt(rt[,(k-1)])*sqrt(dt)*dw[,(k-1)])
+    #rt[,k]=ifelse(rt[,k]<=0, rt[,k-1], rt[,k])
   }
   
   # construct CPR_t
@@ -31,11 +35,11 @@ price_MBS <- function(Principal,MR,term,r0,r_mu,sigma,Kappa){
       RI[k]=0.28+0.14*atan(-8.57+430*(MR-sum(rt[i,k:(k+120)])/120))
       BU[k]=0.3+0.7*loan_t[k]/100000
       SG[k]=min(1,k/12/30)
+      
+      # assuming loan inception in Jan
       month=k%%12
-      if(month==0){
-        month=12}
-      else{
-        month=month}
+      month=ifelse(month==0, 12, month) # assign month number
+
       CPR[i,k]=RI[k]*BU[k]*SG[k]*SY[month]
       SP[k]=PMT-loan_t[k]*r
       PP[k]=(loan_t[k]-SP[k])*(1-(1-CPR[i,k])^(1/12))
@@ -44,6 +48,8 @@ price_MBS <- function(Principal,MR,term,r0,r_mu,sigma,Kappa){
       loan_t[k+1]=loan_t[k]*(1+r)-Ct[k]
     }
     
+    
+    # to keep track of loan balance, stop when paid-off
     j=1
     loan=loan_t
     while(loan[j]>0){
@@ -51,6 +57,7 @@ price_MBS <- function(Principal,MR,term,r0,r_mu,sigma,Kappa){
       ZCB[j]=Ct[j]*exp(-sum(rt[i,2:j])*dt)
       j=j+1
     }
+    
     ZCB[j]=loan[j-1]*exp(-sum(rt[i,2:(j+1)])*dt)
     price[i]=sum(ZCB)
   }
